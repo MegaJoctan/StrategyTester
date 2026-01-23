@@ -81,8 +81,8 @@ def fetch_historical_bars(
 
         df = df.with_columns(
             pl.from_epoch("time", time_unit="s")
-              .dt.replace_time_zone("utc")
-              .alias("time")
+            .dt.replace_time_zone("utc")
+            .alias("time")
         )
 
         df = df.with_columns([
@@ -107,48 +107,3 @@ def fetch_historical_bars(
         return pl.DataFrame()
 
     return pl.concat(dfs, how="vertical")
-
-"""
-if __name__ == "__main__":
-    
-    if not mt5.initialize():
-        print(f"Failed to Initialize MetaTrader5. Error = {mt5.last_error()}")
-        mt5.shutdown()
-        quit()
-    
-    start_date = datetime(2022, 1, 1, tzinfo=timezone.utc)
-    end_date = datetime.now(tz=timezone.utc)
-    
-    fetch_historical_bars("XAUUSD", mt5.TIMEFRAME_M1, start_date, end_date)
-    fetch_historical_bars("EURUSD", mt5.TIMEFRAME_H1, start_date, end_date)
-    fetch_historical_bars("GBPUSD", mt5.TIMEFRAME_M5, start_date, end_date)
-    
-    # read polaris dataframe and print the head for both symbols
-
-    symbol = "GBPUSD"
-    timeframe = TIMEFRAMES_REV[mt5.TIMEFRAME_M5]
-    
-    path = os.path.join(BARS_HISTORY_DIR, symbol, timeframe)
-    
-    lf = pl.scan_parquet(path)
-
-    jan_2024 = (
-        lf
-        .filter(
-            (pl.col("year") == 2024) &
-            (pl.col("month") == 1)
-        )
-        .collect(engine="streaming")
-    )
-
-    print("January 2024:\n", jan_2024.head(-10))
-    print(
-        jan_2024.select([
-            pl.col("time").min().alias("time_min"),
-            pl.col("time").max().alias("time_max")
-        ])
-    )
-
-    
-    mt5.shutdown()
-"""
