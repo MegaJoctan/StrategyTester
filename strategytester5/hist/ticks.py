@@ -19,8 +19,11 @@ def ticks_to_polars(ticks):
 def fetch_historical_ticks(which_mt5: MetaTrader5,
                         start_datetime: datetime, 
                         end_datetime: datetime,
-                        symbol: str) -> pl.DataFrame:
-
+                        symbol: str,
+                        return_df: bool = False
+                        ) -> pl.DataFrame:
+    
+    
     start_datetime = ensure_utc(start_datetime)
     end_datetime   = ensure_utc(end_datetime)
 
@@ -81,18 +84,14 @@ def fetch_historical_ticks(which_mt5: MetaTrader5,
             partition_by=["year", "month"],
             mkdir=True
         )
-
-        # if config.is_debug: 
-        #     print(df.head(-10))
-            
-        dfs.append(df)
+        
+        if return_df:
+            dfs.append(df)
 
         current = (month_start + timedelta(days=32)).replace(day=1)
 
-    if not dfs:
-        return pl.DataFrame()
-
-    return pl.concat(dfs, how="vertical")
+    return pl.concat(dfs, how="vertical") if return_df else None
+    
     
 class TicksGen:
     def __init__(self):
@@ -239,9 +238,6 @@ class TicksGen:
             if return_df:
                 dfs.append(df)
 
-        if return_df and dfs:
-            return pl.concat(dfs, how="vertical")
-
-        return pl.DataFrame()
+        return pl.concat(dfs, how="vertical") if return_df else None
 
 
