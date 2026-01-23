@@ -2,6 +2,7 @@ from datetime import datetime, timezone, timedelta
 import os
 import polars as pl
 from strategytester5 import *
+import numpy as np
 
 def ticks_to_polars(ticks):
     return pl.DataFrame({
@@ -93,40 +94,154 @@ def fetch_historical_ticks(which_mt5: MetaTrader5,
 
     return pl.concat(dfs, how="vertical")
     
-"""
-if __name__ == "__main__":
+class TicksGen:
+    def __init__(self):
+        pass
     
-    if not mt5.initialize():
-        print(f"Failed to Initialize MetaTrader5. Error = {mt5.last_error()}")
-        mt5.shutdown()
-        quit()
+    @staticmethod
+    def interpolate_prices(start, end, steps):
+        if steps <= 1:
+            return [end]
+        return np.linspace(start, end, steps).tolist()
     
-    symbol = "EURUSD"
-    start_dt = datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
-    end_dt = datetime(2025, 12, 1, 1, 0, tzinfo=timezone.utc)
-    
-    fetch_historical_ticks(start_datetime=start_dt, end_datetime=end_dt, symbol=symbol)
-    fetch_historical_ticks(start_datetime=start_dt, end_datetime=end_dt, symbol= "GBPUSD")
-    
-    path = os.path.join(config.TICKS_HISTORY_DIR, symbol)
-    lf = pl.scan_parquet(path)
+    def build_support_points(bar: dict) -> list:
+        o, h, l, c = bar["open"], bar["high"], bar["low"], bar["close"]
 
-    jan_2024 = (
-        lf
-        .filter(
-            (pl.col("year") == 2024) &
-            (pl.col("month") == 1)
-        )
-        .collect(engine="streaming")
-    )
+        if c >= o:  # bullish
+            return [o, l, h, c]
+        else:       # bearish
+            return [o, h, l, c]
+    
+    @staticmethod    
+    def __resolve_tick_count(bar: dict) -> int:
+        # MT5 internally limits complexity
+        return max(1, min(bar["tick_volume"], 20))
+    
+    @staticmethod
+    def generate_ticks_from_bar(bar: dict, symbol_point: float):
+        tick_count = TicksGen.__resolve_tick_count(bar)
+        spread = bar["spread"]
 
-    print("January 2024:\n", jan_2024.head(-10))
-    print(
-        jan_2024.select([
-            pl.col("time").min().alias("time_min"),
-            pl.col("time").max().alias("time_max")
+        base_msc = int(bar["time"].timestamp() * 1000)
+        step = max(1, 1000 // tick_count)
+
+        ticks = []
+
+        # ---- 1 tick -----
+        if tick_count == 1:
+            price = bar["close"]
+            return [
+                make_tick(
+                    bar["time"],
+                    price,
+                    price + spread * symbol_point,
+                    time_msc=base_msc
+                )
+            ]
+
+        # ----- 2 ticks ----
+        if tick_count == 2:
+            return [
+                make_tick(bar["time"], bar["open"], bar["open"] + spread * symbol_point, time_msc=base_msc),
+                make_tick(bar["time"], bar["close"], bar["close"] + spread * symbol_point, time_msc=base_msc + step),
+            ]
+
+        # ---- Support points ----
+        support_points = TicksGen.build_support_points(bar)
+        segments = len(support_points) - 1
+        ticks_per_segment = tick_count // segments
+        remainder = tick_count % segments
+
+        t_index = 0
+        for i in range(segments):
+            start = support_points[i]
+            end = support_points[i + 1]
+            steps = ticks_per_segment + (1 if i < remainder else 0)
+
+            prices = TicksGen.interpolate_prices(start, end, steps)
+            for price in prices:
+                ticks.append(
+                    make_tick(
+                        time=bar["time"],
+                        bid=float(price),
+                        ask=float(price + spread * symbol_point),
+                        time_msc=base_msc + t_index * step
+                    )
+                )
+                t_index += 1
+
+        return ticks[:tick_count]
+
+    @staticmethod
+    def generate_ticks_from_bars(
+        bars: pl.DataFrame,
+        symbol: str,
+        symbol_point: float,
+        out_dir: str,
+        return_df: bool = False,
+    ) -> pl.DataFrame:
+
+        dfs: list[pl.DataFrame] = []
+
+        # Ensure sorted (important!)
+        bars = bars.sort("time")
+
+        # Add year/month once
+        bars = bars.with_columns([
+            pl.col("time").dt.year().alias("year"),
+            pl.col("time").dt.month().alias("month"),
         ])
-    )
-    
-    mt5.shutdown()
-"""
+
+        for (year, month), bars_chunk in bars.group_by(["year", "month"], maintain_order=True):
+
+            if LOGGER is None:
+                print(f"Generating ticks for {symbol}: {year}-{month:02d}")
+            else:
+                LOGGER.info(f"Generating ticks for {symbol}: {year}-{month:02d}")
+
+            tick_rows = []
+
+            for bar in bars_chunk.iter_rows(named=True):
+                ticks = TicksGen.generate_ticks_from_bar(bar, symbol_point)
+                if ticks:
+                    tick_rows.extend(ticks)
+
+            if not tick_rows:
+                continue
+
+            df = (
+                pl.DataFrame(
+                    tick_rows,
+                    schema={
+                        "time": pl.Datetime("us", time_zone="UTC"),
+                        "bid": pl.Float64,
+                        "ask": pl.Float64,
+                        "last": pl.Float64,
+                        "volume": pl.UInt64,
+                        "time_msc": pl.Int64,
+                        "flags": pl.Int8,
+                        "volume_real": pl.UInt64,
+                    },
+                )
+                .with_columns([
+                    pl.col("time").dt.year().alias("year"),
+                    pl.col("time").dt.month().alias("month"),
+                ])
+            )
+
+            # Write monthly partition
+            df.write_parquet(
+                os.path.join(out_dir, symbol),
+                partition_by=["year", "month"],
+                mkdir=True,
+            )
+
+            if return_df:
+                dfs.append(df)
+
+        if return_df and dfs:
+            return pl.concat(dfs, how="vertical")
+
+        return pl.DataFrame()
+
+
