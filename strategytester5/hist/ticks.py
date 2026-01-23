@@ -1,4 +1,4 @@
-import MetaTrader5 as mt5
+import MetaTrader5
 from datetime import datetime, timezone, timedelta
 import os
 import polars as pl
@@ -16,17 +16,10 @@ def ticks_to_polars(ticks):
         "volume_real": ticks["volume_real"],
     })
     
-def fetch_historical_ticks(start_datetime: datetime, 
+def fetch_historical_ticks(which_mt5: MetaTrader5,
+                        start_datetime: datetime, 
                         end_datetime: datetime,
                         symbol: str) -> pl.DataFrame:
-    """
-    if not ensure_symbol(symbol=symbol):
-        if LOGGER is None:
-            print(f"Symbol {symbol} not available")
-        else:
-            LOGGER.warning(f"Symbol {symbol} not available")
-        return pl.DataFrame()
-    """
 
     start_datetime = ensure_utc(start_datetime)
     end_datetime   = ensure_utc(end_datetime)
@@ -52,11 +45,11 @@ def fetch_historical_ticks(start_datetime: datetime,
         else:
             LOGGER.info(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
 
-        ticks = mt5.copy_ticks_range(
+        ticks = which_mt5.copy_ticks_range(
             symbol,
             month_start,
             month_end,
-            mt5.COPY_TICKS_ALL
+            which_mt5.COPY_TICKS_ALL
         )
 
         if ticks is None or len(ticks) == 0:
