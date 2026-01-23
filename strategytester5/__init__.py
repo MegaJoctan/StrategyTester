@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 from calendar import monthrange
 import MetaTrader5
+from typing import Any
 
 IS_DEBUG = True
 
@@ -24,7 +25,7 @@ Tick = namedtuple(
     ]
 )
 
-def ensure_symbol(mt5_instance: MetaTrader5, symbol: str) -> bool:
+def ensure_symbol(mt5_instance: Any, symbol: str) -> bool:
     info = mt5_instance.symbol_info(symbol)
     if info is None:
         print(f"Symbol {symbol} not found")
@@ -244,8 +245,7 @@ TradePosition = namedtuple(
         "external_id",
         
         # ---- additional fields ----
-        
-        "last_swap_time", 
+        # "last_swap_time", 
         "margin", #
     ]
 )
