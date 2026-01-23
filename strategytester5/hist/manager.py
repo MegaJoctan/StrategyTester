@@ -46,18 +46,27 @@ class HistoryManager:
             self.max_cpu_workers = max(1, os.cpu_count() - 1)
     
     def __critical_log(self, msg: str):
+        """Log a critical message via LOGGER or print as fallback."""
         if LOGGER is not None:
             LOGGER.critical(msg)
         else:
             print(msg)
     
     def __info_log(self, msg: str):
+        """Log an info message via LOGGER or print as fallback."""
         if LOGGER is not None:
             LOGGER.info(msg)
         else:
             print(msg)
             
     def _fetch_bars_worker(self, symbol: str, timeframe: int, return_df: bool=False) -> dict:
+        """Fetch historical bars for a symbol and return summary info when requested.
+
+        Args:
+            symbol: Instrument symbol to fetch.
+            timeframe: MT5 timeframe constant to query.
+            return_df: If True, return a dict with bars and metadata; else {}.
+        """
 
         bars_obtained = bars.fetch_historical_bars(
             which_mt5=self.mt5_instance,
@@ -79,6 +88,12 @@ class HistoryManager:
         return bars_info if return_df else {}
 
     def _fetch_ticks_worker(self, symbol: str, return_df: bool=False) -> dict:
+        """Fetch real ticks for a symbol and return summary info when requested.
+
+        Args:
+            symbol: Instrument symbol to fetch.
+            return_df: If True, return a dict with ticks and metadata; else {}.
+        """
         
         ticks_obtained = ticks.fetch_historical_ticks(
             which_mt5=self.mt5_instance, start_datetime=self.start_dt, end_datetime=self.end_dt, symbol=symbol
@@ -94,6 +109,12 @@ class HistoryManager:
         return ticks_info if return_df else {}
     
     def _gen_ticks_worker(self, symbol: str, return_df: bool=False) -> dict:
+        """Generate synthetic ticks from M1 bars for a symbol and saves data.
+
+        Args:
+            symbol: Instrument symbol to generate ticks for.
+            return_df: If True, return a dict with ticks and metadata; else {}.
+        """
         
         one_minute_bars = bars.fetch_historical_bars(
             which_mt5=self.mt5_instance,
@@ -122,6 +143,14 @@ class HistoryManager:
         return ticks_info if return_df else {}
 
     def fetch_history(self, modelling: str):
+        """Fetch bars or ticks for all symbols according to the modelling mode.
+
+        Args:
+            modelling: One of "real_ticks", "every_tick", "new_bar", "1-minute-ohlc".
+
+        Returns:
+            Tuple of (all_bars_info, all_ticks_info) lists.
+        """
 
         all_ticks_info = []
         all_bars_info = []
@@ -182,19 +211,22 @@ class HistoryManager:
             self.__info_log(f"Total bars collected: {total_bars} from '{TIMEFRAMES_MAP_REVERSE[tf]}' timeframe in {(time.time()-start_time):.2f} seconds.")
             
         return all_bars_info, all_ticks_info
-    
+
     def synchronize_timeframes(self):
-        
-        all_tf_keys = list(TIMEFRAMES_MAP.values())
 
-        start_time = time.time()
+        all_tfs = list(TIMEFRAMES_MAP.values())
+        start = time.time()
 
-        self.__info_log("synchronizing timeframes...")
-        self.__info_log(all_tf_keys)
+        with ThreadPoolExecutor(max_workers=self.max_fetch_workers) as ex:
+            futs = {ex.submit(self._fetch_bars_worker, sym, tf, False): (sym, tf)
+                    for sym in self.symbols
+                    for tf in all_tfs}
 
-        for symbol in self.symbols:
-            with ThreadPoolExecutor(max_workers=self.max_fetch_workers) as executor:
-                futs = {executor.submit(self._fetch_bars_worker, symbol, tf): tf for tf in all_tf_keys}
+            for fut in as_completed(futs):
+                sym, tf = futs[fut]
+                try:
+                    fut.result()
+                except Exception as e:
+                    self.__critical_log(f"sync failed {sym} {TIMEFRAMES_MAP_REVERSE.get(tf, tf)}: {e!r}")
 
-        self.__info_log(f"Timeframes synchronization complete! {(time.time()-start_time):.2f} seconds elapsed.")
-        
+        self.__info_log(f"Timeframes synchronization complete! {(time.time() - start):.2f}s elapsed.")
