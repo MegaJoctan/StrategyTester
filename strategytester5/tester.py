@@ -1,7 +1,4 @@
 from strategytester5 import *
-# from strategytester import Tick, TradeOrder, TradePosition, TradeDeal, AccountInfo
-
-import MetaTrader5 as mt5
 from . import error_description
 from datetime import datetime, timedelta, timezone
 import secrets
@@ -9,16 +6,13 @@ import time
 import os
 import numpy as np
 import fnmatch
-from typing import Optional, Tuple
-from collections import namedtuple
+from typing import Optional
 import polars as pl
-from strategytester5.validators._trade import TradeValidators
-from strategytester5.validators._tester_configs import TesterConfigValidators
+from strategytester5.validators.trade import TradeValidators
+from strategytester5.validators.tester_configs import TesterConfigValidators
 from strategytester5._template import html_report_template
+from strategytester5.hist.manager import  HistoryManager
 import sys
-
-from strategytester5.hist import ticks, bars
-from strategytester5.hist.ticks_gen import TicksGen
 
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -30,21 +24,30 @@ mpl.rcParams["path.simplify_threshold"] = 0.1
 
 
 class StrategyTester:
-    def __init__(self, tester_config: dict, mt5_instance: mt5, logs_dir: Optional[str]="Logs", reports_dir: Optional[str]="Reports", history_dir: Optional[str]="History"):
+    def __init__(self,
+                 tester_config: dict,
+                 mt5_instance: MetaTrader5,
+                 logs_dir: Optional[str]="Logs",
+                 reports_dir: Optional[str]="Reports",
+                 history_dir: Optional[str]="History"):
         
         """MetaTrader 5-Like Strategy tester for the MetaTrader5-Python module.
 
         Args:
-            configs_json (dict): a dictonary containing tester configurations
+            tester_config: Dictionary of tester configuration values.
+            mt5_instance: MetaTrader5 API/client instance used for obtaining crucial information from the broker as an attempt to mimic the terminal.
+            logs_dir: Directory for log files.
+            reports_dir: Directory for HTML reports and assets.
+            history_dir: Directory for historical data storage.
         Raises:
-            RuntimeError: When one of the operation fails
+            RuntimeError: If required MT5 account info cannot be obtained.
         """
         
         self.reports_dir = reports_dir
         self.history_dir = history_dir
         
-        
-        self.symbol_info_cache: dict[str, namedtuple] = {}
+        self.symbol_info_cache: dict[str, SymbolInfo] = {}
+        self.trade_validators_cache: dict[str, TradeValidators] = {}
         self.tick_cache: dict[str, Tick] = {}
         
         # ---------------- validate all configs from a dictionary -----------------
@@ -54,7 +57,6 @@ class StrategyTester:
         # -------------- Check if we are not on the tester mode ------------------
         
         self.IS_TESTER = not any(arg.startswith("--mt5") for arg in sys.argv) # are we on the strategy tester mode or live trading
-        
             
         # -------------------- initialize the Loggers ----------------------------
         
@@ -84,83 +86,18 @@ class StrategyTester:
         
         self.logger.info("StrategyTester Initializing")
         self.logger.info(f"StrategyTester configs: {self.tester_config}")
-        
-        self.TESTER_ALL_TICKS_INFO = [] # for storing all ticks to be used during the test
-        self.TESTER_ALL_BARS_INFO = [] # for storing all bars to be used during the test
-        
-        start_dt = self.tester_config["start_date"]
-        end_dt = self.tester_config["end_date"]
-        
-        modelling = self.tester_config["modelling"]
-        
-        for symbol in self.tester_config["symbols"]:
-            
-            if modelling == "real_ticks":
-                    
-                ticks_obtained = ticks.fetch_historical_ticks(start_datetime=start_dt, end_datetime=end_dt, symbol=symbol)
-                
-                ticks_info = {
-                    "symbol": symbol,
-                    "ticks": ticks_obtained,
-                    "size": ticks_obtained.height,
-                    "counter": 0
-                }
-                
-                self.TESTER_ALL_TICKS_INFO.append(ticks_info)
-            
-            elif modelling == "new_bar":
-                
-                bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
-                                                        timeframe=TIMEFRAMES_MAP[self.tester_config["timeframe"]],
-                                                        start_datetime=start_dt,
-                                                        end_datetime=end_dt)
-                
-                bars_info = {
-                    "symbol": symbol,
-                    "bars": bars_obtained,
-                    "size": bars_obtained.height,
-                    "counter": 0
-                }
-                
-                self.TESTER_ALL_BARS_INFO.append(bars_info)
-            
-            elif modelling == "1-minute-ohlc":
-                
-                bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
-                                                        timeframe=TIMEFRAMES_MAP["M1"],
-                                                        start_datetime=start_dt,
-                                                        end_datetime=end_dt)
-                
-                bars_info = {
-                    "symbol": symbol,
-                    "bars": bars_obtained,
-                    "size": bars_obtained.height,
-                    "counter": 0
-                }
-                
-                self.TESTER_ALL_BARS_INFO.append(bars_info)
-            
-            elif modelling == "every_tick":
-                
-                bars_df = bars.fetch_historical_bars(symbol=symbol, 
-                                                    timeframe=TIMEFRAMES_MAP["M1"], 
-                                                    start_datetime=start_dt, end_datetime=end_dt)
-                
-                dir = os.path.join(self.history_dir, "Ticks", "Simulated", symbol)
-                ticks_obtained = TicksGen.generate_ticks_from_bars(bars=bars_df, symbol=symbol, 
-                                                                symbol_point=self.symbol_info(symbol).point,
-                                                                out_dir=dir, 
-                                                                return_df=True)
-                
-                ticks_info = {
-                    "symbol": symbol,
-                    "ticks": ticks_obtained,
-                    "size": ticks_obtained.height,
-                    "counter": 0
-                }
-                
-                self.TESTER_ALL_TICKS_INFO.append(ticks_info)
-                
+
+        hist_manager = HistoryManager(mt5_instance=self.mt5_instance,
+                                      symbols=self.tester_config["symbols"],
+                                      start_dt=self.tester_config["start_date"],
+                                      end_dt=self.tester_config["end_date"],
+                                      timeframe=self.tester_config["timeframe"],
+                                      history_dir=self.history_dir
+                                      )
+
+        self.TESTER_ALL_BARS_INFO, self.TESTER_ALL_TICKS_INFO = hist_manager.fetch_history(self.tester_config["modelling"])
+        hist_manager.synchronize_timeframes()
+
         self.logger.info("Initialized")
         
         # ----------------- initialize internal containers -----------------
@@ -223,37 +160,6 @@ class StrategyTester:
             )
         )
         
-        self.symbol_info_cache: dict[str, namedtuple] = {}
-        self.tick_cache: dict[str, namedtuple] = {}
-        
-        self.ORDER_TYPES = [
-            self.mt5_instance.ORDER_TYPE_BUY,
-            self.mt5_instance.ORDER_TYPE_SELL,
-            self.mt5_instance.ORDER_TYPE_BUY_LIMIT,
-            self.mt5_instance.ORDER_TYPE_SELL_LIMIT,
-            self.mt5_instance.ORDER_TYPE_BUY_STOP,
-            self.mt5_instance.ORDER_TYPE_SELL_STOP,
-            self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT,
-            self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
-            self.mt5_instance.ORDER_TYPE_CLOSE_BY
-            ]
-        
-        self.BUY_ACTIONS = {
-            # self.mt5_instance.POSITION_TYPE_BUY,
-            self.mt5_instance.ORDER_TYPE_BUY,
-            self.mt5_instance.ORDER_TYPE_BUY_LIMIT,
-            self.mt5_instance.ORDER_TYPE_BUY_STOP,
-            self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT,
-        }
-
-        self.SELL_ACTIONS = {
-            # self.mt5_instance.POSITION_TYPE_SELL,
-            self.mt5_instance.ORDER_TYPE_SELL,
-            self.mt5_instance.ORDER_TYPE_SELL_LIMIT,
-            self.mt5_instance.ORDER_TYPE_SELL_STOP,
-            self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
-        }
-        
         # -------------------- tester reports ----------------------------
         
         self.last_curve_minute = -1
@@ -284,11 +190,11 @@ class StrategyTester:
         self.tester_curves["equity"].append(self.AccountInfo.equity)
         self.tester_curves["margin"].append(self.AccountInfo.margin)
     
-    def __account_state_update(self, account_info: namedtuple):
+    def __account_state_update(self, account_info: AccountInfo):
         
         self.AccountInfo = account_info
         
-    def account_info(self) -> namedtuple:
+    def account_info(self) -> AccountInfo:
         
         """Gets info on the current trading account."""
         
@@ -302,7 +208,7 @@ class StrategyTester:
             
         return mt5_ac_info
     
-    def symbol_info(self, symbol: str) -> namedtuple:    
+    def symbol_info(self, symbol: str) -> SymbolInfo:    
         
         """Gets data on the specified financial instrument."""
         
@@ -315,20 +221,24 @@ class StrategyTester:
         
         return self.symbol_info_cache[symbol]
 
-    def symbol_info_tick(self, symbol: str) -> namedtuple:
+    def symbol_info_tick(self, symbol: str) -> Tick:
         """Get the last tick for the specified financial instrument.
 
         Returns:
-            namedtuple: 
+            Tick: Returns the tick data as a named tuple Tick. Returns None in case of an error. The info on the error can be obtained using last_error().
         """
-        
+
+        tick = None
         if self.IS_TESTER:
-            return self.tick_cache[symbol] 
-        
-        try:
-            tick = self.mt5_instance.symbol_info_tick(symbol)
-        except Exception as e:
-            self.logger.warning(f"Failed. MT5 Error = {self.mt5_instance.last_error()}")
+            try:
+                tick = self.tick_cache[symbol]
+            except KeyError:
+                self.logger.warning(f"{symbol} not found in the tick cache")
+        else:
+            try:
+                tick = self.mt5_instance.symbol_info_tick(symbol)
+            except Exception as e:
+                self.logger.warning(f"Failed. MT5 Error = {self.mt5_instance.last_error()}")
             
         return tick
     
@@ -350,8 +260,9 @@ class StrategyTester:
             tick = make_tick_from_tuple(tick)
         
         self.tick_cache[symbol] = tick
-    
-    def __mt5_data_to_dicts(self, rates) -> list[dict]:
+
+    @staticmethod
+    def __mt5_data_to_dicts(rates) -> list[dict]:
         
         if rates is None or len(rates) == 0:
             return []
@@ -551,7 +462,7 @@ class StrategyTester:
 
         return mask
 
-    def copy_ticks_from(self, symbol: str, date_from: datetime, count: int, flags: int=mt5.COPY_TICKS_ALL) -> np.array:
+    def copy_ticks_from(self, symbol: str, date_from: datetime, count: int, flags: int=MetaTrader5.COPY_TICKS_ALL) -> np.array:
         
         """Get ticks from the MetaTrader 5 terminal starting from the specified date.
 
@@ -617,7 +528,7 @@ class StrategyTester:
         return ticks
     
     
-    def copy_ticks_range(self, symbol: str, date_from: datetime, date_to: datetime, flags: int=mt5.COPY_TICKS_ALL) -> np.array:
+    def copy_ticks_range(self, symbol: str, date_from: datetime, date_to: datetime, flags: int=MetaTrader5.COPY_TICKS_ALL) -> np.array:
         
         """Get ticks for the specified date range from the MetaTrader 5 terminal.
 
@@ -704,7 +615,7 @@ class StrategyTester:
         
         return total
     
-    def orders_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> namedtuple:
+    def orders_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> tuple[TradeOrder]:
                 
         """Get active orders with the ability to filter by symbol or ticket. There are three call options.
 
@@ -716,7 +627,7 @@ class StrategyTester:
         
         Returns:
         
-            list: Returns info in the form of a named tuple structure (namedtuple). Return None in case of an error. The info on the error can be obtained using last_error().
+            list: Returns info in the form of a tuple structure (TradeOrder). Return None in case of an error. The info on the error can be obtained using last_error().
         """
         
         if self.IS_TESTER:
@@ -774,7 +685,7 @@ class StrategyTester:
         
         return total
 
-    def positions_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> namedtuple:
+    def positions_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> tuple[TradePosition]:
         
         """Get open positions with the ability to filter by symbol or ticket. There are three call options.
 
@@ -785,8 +696,8 @@ class StrategyTester:
             ticket (int | optional): Position ticket -> https://www.mql5.com/en/docs/constants/tradingconstants/positionproperties#enum_position_property_integer
         
         Returns:
-        
-            list: Returns info in the form of a named tuple structure (namedtuple). Return None in case of an error. The info on the error can be obtained using last_error().
+
+            list: Returns info in the form of a tuple structure (TradePosition). Return None in case of an error. The info on the error can be obtained using last_error().
         """
         
         if self.IS_TESTER:
@@ -863,7 +774,7 @@ class StrategyTester:
                            group: Optional[str] = None,
                            ticket: Optional[int] = None,
                            position: Optional[int] = None
-                           ) -> namedtuple:
+                           ) -> tuple[TradeOrder]:
         
         if self.IS_TESTER:
 
@@ -968,7 +879,7 @@ class StrategyTester:
                           group: Optional[str] = None,
                           ticket: Optional[int] = None,
                           position: Optional[int] = None
-                        ) -> namedtuple:
+                        ) -> tuple[TradeDeal]:
         """Gets deals from trading history within the specified interval with the ability to filter by ticket or position.
 
         Args:
@@ -986,7 +897,7 @@ class StrategyTester:
             ValueError: MetaTrader5 error
 
         Returns:
-            namedtuple: information about deals
+            tuple[TradeDeal]: information about deals
         """
                 
         if self.IS_TESTER:
@@ -1047,19 +958,21 @@ class StrategyTester:
         except Exception as e:
             self.logger.error(f"MetaTrader5 error = {e}")
             return None
-    
+
     def __generate_deal_ticket(self) -> int:
         return len(self.__deals_history_container__)+1
-    
-    def __generate_order_ticket(self) -> int:
+
+    @staticmethod
+    def __generate_order_ticket() -> int:
         ts = int(time.time_ns())
         rand = secrets.randbits(6)
         return (ts << 6) | rand
 
     def __generate_order_history_ticket(self) -> int:
         return len(self.__orders_history_container__)+1
-    
-    def __generate_position_ticket(self) -> int:
+
+    @staticmethod
+    def __generate_position_ticket() -> int:
         ts = int(time.time_ns())
         rand = secrets.randbits(6)
         return (ts << 6) | rand
@@ -1071,7 +984,7 @@ class StrategyTester:
 
         return -0.2
     
-    def __position_to_order(self, position: namedtuple, ticket=None) -> namedtuple:
+    def __position_to_order(self, position: TradePosition, ticket=None) -> TradeOrder:
         """
         Converts an opened position into a FILLED order
         (MT5 orders history behavior)
@@ -1108,6 +1021,19 @@ class StrategyTester:
             comment=position.comment,
             external_id=position.external_id,
         )
+    
+    def __getTradeValidators(self, symbol: str):
+        """Returns TradeValidators instance for the given symbol."""
+        
+        if symbol not in self.trade_validators_cache:
+            
+            self.trade_validators_cache[symbol] = TradeValidators(
+                symbol_info=self.symbol_info(symbol),
+                logger=self.logger,
+                mt5_instance=self.mt5_instance
+            )
+            
+        return self.trade_validators_cache[symbol]
 
     def order_send(self, request: dict):
         """
@@ -1150,14 +1076,11 @@ class StrategyTester:
         
         
         if order_type is not None:
-            if order_type not in self.ORDER_TYPES:
+            if order_type not in ORDER_TYPE_MAP.keys():
                 self.logger.critical("Invalid order type")
                 return None 
     
-        trade_validators = TradeValidators(symbol_info=symbol_info, 
-                                        ticks_info=ticks_info, 
-                                        logger=self.logger, 
-                                        mt5_instance=self.mt5_instance)
+        trade_validators = self.__getTradeValidators(symbol=symbol)
 
         # ------------------ MARKET DEAL (open or close) ------------------
         
@@ -1175,10 +1098,10 @@ class StrategyTester:
                 
             # ---------- CLOSE POSITION ----------
             
-            ticket = request.get("position", -1)
-            if ticket != -1:
+            position_ticket = request.get("position", -1)
+            if position_ticket != -1:
                 pos = next(
-                    (p for p in self.__positions_container__ if p.ticket == ticket),
+                    (p for p in self.__positions_container__ if p.ticket == position_ticket),
                     None,
                 )
                 
@@ -1202,11 +1125,20 @@ class StrategyTester:
                         self.logger.critical(f"Failed to close ORDER_TYPE_BUY. Price {price} is not equal to bid {ticks_info.bid}")
                         return None
                 
-                # update the account balance    
+                # update account info    
+                
+                commission = self.__calc_commission() # calculate commission
+                
+                new_balance = self.AccountInfo.balance + pos.profit + commission
+                ac_margin = self.AccountInfo.margin
+                new_margin = ac_margin - pos.margin
                 
                 self.AccountInfo = self.AccountInfo._replace(
-                    balance=self.AccountInfo.balance + pos.profit
+                    balance=new_balance,
+                    margin=new_margin,
                 )
+
+                self.__account_monitoring()
                 
                 self.__positions_container__.remove(pos) 
                 
@@ -1228,7 +1160,7 @@ class StrategyTester:
                         reason=deal_reason_gen(),
                         volume=volume,
                         price=price,
-                        commission=self.__calc_commission(),
+                        commission=commission,
                         swap=0,
                         profit=pos.profit,
                         fee=0,
@@ -1239,7 +1171,7 @@ class StrategyTester:
                     )
                 )
 
-                self.logger.info(f"Position: {ticket} closed!")
+                self.logger.info(f"Position: {position_ticket} closed!")
                 
                 return {
                     "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
@@ -1247,6 +1179,9 @@ class StrategyTester:
                 }
                 
             # ---------- OPEN POSITION ----------
+            
+            if not trade_validators.is_valid_entry_price(order_type=order_type, price=price, tick_info=ticks_info):
+                return None
             
             # validate new stops 
             
@@ -1264,17 +1199,13 @@ class StrategyTester:
             if trade_validators.is_symbol_volume_reached(symbol_volume=total_volume, volume_limit=symbol_info.volume_limit):
                 return None
             
-            
-            if not trade_validators.is_there_enough_money(margin_required=self.order_calc_margin(
-                                                        order_type=order_type, 
-                                                        symbol=symbol,
-                                                        volume=volume,
-                                                        price=price), 
-                                                        free_margin=ac_info.margin_free):
+            margin_required = self.order_calc_margin(order_type=order_type, symbol=symbol, volume=volume, price=price)
+
+            if not trade_validators.is_there_enough_money(margin_required=margin_required, free_margin=ac_info.margin_free):
                 return None
             
-            position_ticket = self.__generate_position_ticket()
-            order_ticket    = self.__generate_order_ticket()
+            position_ticket = StrategyTester.__generate_position_ticket()
+            order_ticket    = StrategyTester.__generate_order_ticket()
             deal_ticket     = self.__generate_deal_ticket()
 
             position = TradePosition(
@@ -1297,6 +1228,7 @@ class StrategyTester:
                 symbol=symbol,
                 comment=request.get("comment", ""),
                 external_id="",
+                margin=margin_required
             )
             
             self.__positions_container__.append(position)
@@ -1395,9 +1327,9 @@ class StrategyTester:
             
         elif action == self.mt5_instance.TRADE_ACTION_SLTP:
             
-            ticket = request.get("position", -1)
+            position_ticket = request.get("position", -1)
 
-            pos = next((p for p in self.__positions_container__ if p.ticket == ticket), None)
+            pos = next((p for p in self.__positions_container__ if p.ticket == position_ticket), None)
             if not pos:
                 return {"retcode": self.mt5_instance.TRADE_RETCODE_INVALID}
 
@@ -1416,11 +1348,11 @@ class StrategyTester:
 
             # --- Validate freeze level against MARKET ---
             if sl > 0:
-                if not trade_validators.is_valid_freeze_level(entry=market_price, stop_price=sl, order_type=pos.type):
+                if not trade_validators.is_valid_freeze_level(tick_info=ticks_info, entry=market_price, stop_price=sl, order_type=pos.type):
                     return None
 
             if tp > 0:
-                if not trade_validators.is_valid_freeze_level(entry=market_price, stop_price=tp, order_type=pos.type):
+                if not trade_validators.is_valid_freeze_level(tick_info=ticks_info, entry=market_price, stop_price=tp, order_type=pos.type):
                     return None
 
             # --- APPLY MODIFICATION ---
@@ -1444,10 +1376,10 @@ class StrategyTester:
         
         elif action == self.mt5_instance.TRADE_ACTION_MODIFY: # Modifying pending orders
 
-            ticket = request.get("order", -1)
+            order_ticket = request.get("order", -1)
 
             order = next(
-                (o for o in self.__orders_container__ if o.ticket == ticket),
+                (o for o in self.__orders_container__ if o.ticket == order_ticket),
                 None,
             )
 
@@ -1518,23 +1450,11 @@ class StrategyTester:
         if self.IS_TESTER:
             
             contract_size = sym.trade_contract_size
-            
-            BUY_ACTIONS = {
-                self.mt5_instance.ORDER_TYPE_BUY,
-                self.mt5_instance.ORDER_TYPE_BUY_LIMIT,
-                self.mt5_instance.ORDER_TYPE_BUY_STOP,
-                self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT,
-            }
 
-            SELL_ACTIONS = {
-                self.mt5_instance.ORDER_TYPE_SELL,
-                self.mt5_instance.ORDER_TYPE_SELL_LIMIT,
-                self.mt5_instance.ORDER_TYPE_SELL_STOP,
-                self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
-            }
-            
+            direction = 0
+
             # --- Determine direction ---
-            if order_type in BUY_ACTIONS: #TODO: 
+            if order_type in BUY_ACTIONS:
                 direction = 1
             elif order_type in SELL_ACTIONS:
                 direction = -1
@@ -1721,10 +1641,7 @@ class StrategyTester:
         for pos in self.__positions_container__:
             
             unrealized_pl += pos.profit
-            total_margin += self.order_calc_margin(order_type=pos.type, 
-                                                symbol=pos.symbol,
-                                                volume=pos.volume,
-                                                price=pos.price_current)
+            total_margin += pos.margin
             
         self.AccountInfo = self.AccountInfo._replace(
             profit=unrealized_pl,
@@ -1922,7 +1839,7 @@ class StrategyTester:
             "flags": 0,
             "volume_real": 0,
         }
-
+    
     def OnTick(self, ontick_func):
         """Calls the assigned function upon the receival of new tick(s)
 
@@ -2002,7 +1919,8 @@ class StrategyTester:
                             continue
 
                         current_tick = self._bar_to_tick(symbol=symbol, bar=bars_info["bars"].row(counter))
-                        
+                        # print(f"{symbol} current tick: {current_tick}")
+
                         self.__curves_update(current_tick["time"])
                         
                         # Getting ticks at the current bar
@@ -2019,8 +1937,8 @@ class StrategyTester:
                         break
         
         self.__TesterDeinit()
-
-    def __make_balance_deal(self, time: datetime) -> namedtuple:
+    
+    def __make_balance_deal(self, time: datetime) -> TradeDeal:
 
         time_sec = int(time.timestamp())
         time_msc = int(time.timestamp() * 1000)
