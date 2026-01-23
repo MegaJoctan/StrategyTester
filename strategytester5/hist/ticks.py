@@ -1,4 +1,3 @@
-import MetaTrader5
 from datetime import datetime, timezone, timedelta
 import os
 import polars as pl
