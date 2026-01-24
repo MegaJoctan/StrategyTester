@@ -376,7 +376,7 @@ class StrategyTester:
         if self.IS_TESTER:    
             rates = self.copy_rates_from(symbol=symbol, 
                                         timeframe=timeframe,
-                                        date_from=now+timedelta(seconds=PeriodSeconds(timeframe)*start_pos),
+                                        date_from=now.fromtimestamp() + timedelta(seconds=PeriodSeconds(timeframe)*start_pos),
                                         count=count)
         
         else:
