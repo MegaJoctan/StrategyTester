@@ -20,7 +20,8 @@ dependencies = [
   "polars",
   "matplotlib",
   "seaborn",
-  "tqdm"
+  "tqdm",
+  "numba"
 ]
 
 keywords = [
