@@ -106,7 +106,6 @@ class StrategyTester:
         )
 
         hist_manager.synchronize_timeframes()
-
         self.logger.info("Initialized")
         
         # ----------------- initialize internal containers -----------------
@@ -373,12 +372,21 @@ class StrategyTester:
         else:
             now = tick.time
         
-        if self.IS_TESTER:    
+        if self.IS_TESTER:
+
+            date_from = now
+            if isinstance(now, int) or isinstance(now, float):
+                date_from = datetime.fromtimestamp(now)
+
+            date_from += timedelta(seconds=PeriodSeconds(timeframe) * start_pos)
+
             rates = self.copy_rates_from(symbol=symbol, 
                                         timeframe=timeframe,
-                                        date_from=now.fromtimestamp() + timedelta(seconds=PeriodSeconds(timeframe)*start_pos),
+                                        date_from=date_from,
                                         count=count)
-        
+
+            if len(rates) == 0:
+                self.logger.warning(f"no rates found from {date_from} bars: count")
         else:
             
             rates = self.mt5_instance.copy_rates_from_pos(symbol, timeframe, start_pos, count)
@@ -973,8 +981,7 @@ class StrategyTester:
         return len(self.__deals_history_container__)+1
 
     @staticmethod
-    def __generate_order_ticket() -> int:
-        ts = int(time.time_ns())
+    def __generate_order_ticket(ts: int) -> int:
         rand = secrets.randbits(6)
         return (ts << 6) | rand
 
@@ -982,8 +989,7 @@ class StrategyTester:
         return len(self.__orders_history_container__)+1
 
     @staticmethod
-    def __generate_position_ticket() -> int:
-        ts = int(time.time_ns())
+    def __generate_position_ticket(ts: int) -> int:
         rand = secrets.randbits(6)
         return (ts << 6) | rand
 
@@ -1081,9 +1087,9 @@ class StrategyTester:
         #     return None
         
         now = ticks_info.time
-        ts  = int(now)
-        msc = int(now * 1000)
-        
+        ts = now.timestamp() if isinstance(now, datetime) else now
+
+        msc = int(ts * 1000)
         
         if order_type is not None:
             if order_type not in ORDER_TYPE_MAP.keys():
@@ -1214,8 +1220,8 @@ class StrategyTester:
             if not trade_validators.is_there_enough_money(margin_required=margin_required, free_margin=ac_info.margin_free):
                 return None
             
-            position_ticket = StrategyTester.__generate_position_ticket()
-            order_ticket    = StrategyTester.__generate_order_ticket()
+            position_ticket = StrategyTester.__generate_position_ticket(ts=ts)
+            order_ticket    = StrategyTester.__generate_order_ticket(ts=ts)
             deal_ticket     = self.__generate_deal_ticket()
 
             position = TradePosition(
