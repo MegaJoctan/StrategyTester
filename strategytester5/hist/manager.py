@@ -1,4 +1,4 @@
-from strategytester5 import LOGGER, TIMEFRAMES_MAP, TIMEFRAMES_MAP_REVERSE
+from strategytester5 import LOGGER, STRING2TIMEFRAME_MAP, TIMEFRAME2STRING_MAP
 from strategytester5.hist import ticks, bars
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from datetime import datetime
@@ -108,7 +108,16 @@ class HistoryManager:
         }
 
         return ticks_info if return_df else {}
-    
+
+    def __init_worker_mt5(self):
+        """Initialize worker MT5 instance. Useful for ProcessPool"""
+        import MetaTrader5 as mt5
+
+        if not mt5.initialize():
+            raise RuntimeError(f"MT5 init failed in worker: {mt5.last_error()}")
+
+        self.mt5_instance = mt5
+
     def _gen_ticks_worker(self, symbol: str, symbol_points: float, return_df: bool=False) -> dict:
         """Generate synthetic ticks from M1 bars for a symbol and saves data.
 
@@ -116,31 +125,35 @@ class HistoryManager:
             symbol: Instrument symbol to generate ticks for.
             return_df: If True, return a dict with ticks and metadata; else {}.
         """
-        
+
         one_minute_bars = bars.fetch_historical_bars(
             which_mt5=self.mt5_instance,
             symbol=symbol,
-            timeframe=TIMEFRAMES_MAP["M1"],  # <- use your map key directly
+            timeframe=STRING2TIMEFRAME_MAP["M1"],  # <- use your map key directly
             start_datetime=self.start_dt,
             end_datetime=self.end_dt,
-            hist_dir=self.history_dir
+            hist_dir=self.history_dir,
+            return_df=return_df
         )
-        
+
+        if one_minute_bars is None:
+            return {}
+
         ticks_df = ticks.TicksGen.generate_ticks_from_bars(
-            bars=one_minute_bars, 
+            bars=one_minute_bars,
             symbol=symbol,
             symbol_point=symbol_points,
             hist_dir=self.history_dir,
             return_df=True
         )
-        
+
         ticks_info = {
             "symbol": symbol,
             "ticks": ticks_df,
             "size": ticks_df.height,
             "counter": 0
         }
-        
+
         return ticks_info if return_df else {}
 
     def fetch_history(self, modelling: str, symbol_info_func: any):
@@ -173,12 +186,12 @@ class HistoryManager:
 
             total_ticks = sum(info["size"] for info in all_ticks_info)
             self.__info_log(f"Total real ticks collected: {total_ticks} in {(time.time()-start_time):.2f} seconds.")
-        
+
         elif modelling == "every_tick":
-            
+
             start_time = time.time()
-            
-            with ThreadPoolExecutor(max_workers=self.max_cpu_workers) as executor:
+
+            with ThreadPoolExecutor(max_workers=self.max_fetch_workers) as executor:
                 futs = {executor.submit(self._gen_ticks_worker,s, symbol_info_func(s).point, True): s for s in self.symbols}
 
                 for fut in as_completed(futs):
@@ -191,11 +204,11 @@ class HistoryManager:
 
             total_ticks = sum(info["size"] for info in all_ticks_info)
             self.__info_log(f"Total ticks generated: {total_ticks} in {(time.time()-start_time):.2f} seconds.")
-            
+
         elif modelling in ("new_bar", "1-minute-ohlc"):
             
             start_time = time.time()
-            tf = TIMEFRAMES_MAP["M1"] if modelling == "1-minute-ohlc" else TIMEFRAMES_MAP[self.timeframe]
+            tf = STRING2TIMEFRAME_MAP["M1"] if modelling == "1-minute-ohlc" else STRING2TIMEFRAME_MAP[self.timeframe]
             
             with ThreadPoolExecutor(max_workers=self.max_fetch_workers) as executor:
                 futs = {executor.submit(self._fetch_bars_worker, s, tf, True): s for s in self.symbols}
@@ -209,13 +222,13 @@ class HistoryManager:
                         self.__critical_log(f"Failed to fetch bars for {sym}: {e!r}")
 
             total_bars = sum(info["size"] for info in all_bars_info)
-            self.__info_log(f"Total bars collected: {total_bars} from '{TIMEFRAMES_MAP_REVERSE[tf]}' timeframe in {(time.time()-start_time):.2f} seconds.")
+            self.__info_log(f"Total bars collected: {total_bars} from '{TIMEFRAME2STRING_MAP[tf]}' timeframe in {(time.time()-start_time):.2f} seconds.")
             
         return all_bars_info, all_ticks_info
 
     def synchronize_timeframes(self):
 
-        all_tfs = list(TIMEFRAMES_MAP.values())
+        all_tfs = list(STRING2TIMEFRAME_MAP.values())
         start = time.time()
 
         with ThreadPoolExecutor(max_workers=self.max_fetch_workers) as ex:
@@ -228,6 +241,6 @@ class HistoryManager:
                 try:
                     fut.result()
                 except Exception as e:
-                    self.__critical_log(f"sync failed {sym} {TIMEFRAMES_MAP_REVERSE.get(tf, tf)}: {e!r}")
+                    self.__critical_log(f"sync failed {sym} {TIMEFRAME2STRING_MAP.get(tf, tf)}: {e!r}")
 
         self.__info_log(f"Timeframes synchronization complete! {(time.time() - start):.2f}s elapsed.")
