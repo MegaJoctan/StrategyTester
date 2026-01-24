@@ -97,7 +97,12 @@ class HistoryManager:
         """
         
         ticks_obtained = ticks.fetch_historical_ticks(
-            which_mt5=self.mt5_instance, start_datetime=self.start_dt, end_datetime=self.end_dt, symbol=symbol
+            which_mt5=self.mt5_instance,
+            start_datetime=self.start_dt,
+            end_datetime=self.end_dt,
+            symbol=symbol,
+            return_df=True,
+            hist_dir=self.history_dir
         )
         
         ticks_info = {
