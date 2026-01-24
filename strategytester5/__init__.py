@@ -102,16 +102,10 @@ def make_tick(
 
     # MT5 semantics
     time  = ensure_utc(time)
-
-    if time_msc == 0:
-        if isinstance(time, datetime):
-            time_msc = time.timestamp()
-                
-    time_sec = int(time.timestamp())
     time_msc = int(time.timestamp() * 1000)
 
     return Tick(
-        time=time_sec,
+        time=time,
         bid=float(bid),
         ask=float(ask),
         last=float(bid if last==0 else last),
