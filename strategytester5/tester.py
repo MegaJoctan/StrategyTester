@@ -1,3 +1,5 @@
+from fontTools.misc.bezierTools import epsilon
+
 from strategytester5 import *
 from . import error_description
 from datetime import datetime, timedelta, timezone
@@ -95,7 +97,14 @@ class StrategyTester:
                                       history_dir=self.history_dir
                                       )
 
-        self.TESTER_ALL_BARS_INFO, self.TESTER_ALL_TICKS_INFO = hist_manager.fetch_history(self.tester_config["modelling"], symbol_info_func=self.symbol_info)
+        for symbol in self.tester_config["symbols"]:
+            self.symbol_info(symbol)
+
+        self.TESTER_ALL_BARS_INFO, self.TESTER_ALL_TICKS_INFO = hist_manager.fetch_history(
+            self.tester_config["modelling"],
+            symbol_info_func=self.symbol_info,
+        )
+
         hist_manager.synchronize_timeframes()
 
         self.logger.info("Initialized")
@@ -211,14 +220,15 @@ class StrategyTester:
     def symbol_info(self, symbol: str) -> SymbolInfo:    
         
         """Gets data on the specified financial instrument."""
-        
+
         if symbol not in self.symbol_info_cache:
             info = self.mt5_instance.symbol_info(symbol)
             if info is None:
+                self.logger.warning(f"Failed to obtain symbol info for {symbol}")
                 return None
-            
+
             self.symbol_info_cache[symbol] = info
-        
+
         return self.symbol_info_cache[symbol]
 
     def symbol_info_tick(self, symbol: str) -> Tick:
@@ -2077,7 +2087,7 @@ class StrategyTester:
         self.tester_stats["Gross Loss"] = np.sum(losses) if losses else 0
         self.tester_stats["Net Profit"] = self.tester_stats["Gross Profit"] + self.tester_stats["Gross Loss"]
         
-        self.tester_stats["Profit Factor"] = self.tester_stats["Gross Profit"] / self.tester_stats["Gross Loss"]
+        self.tester_stats["Profit Factor"] = self.tester_stats["Gross Profit"] / (self.tester_stats["Gross Loss"]+epsilon)
         
         self.tester_stats["Expected Payoff"] = (
             self.tester_stats["Net Profit"] / total_trades
@@ -2085,7 +2095,11 @@ class StrategyTester:
         )
 
         def max_drawdown(curve):
-            peak = curve[0]
+            try:
+                peak = curve[0]
+            except IndexError:
+                peak = 0
+
             max_dd = 0.0
 
             for value in curve:
@@ -2291,8 +2305,8 @@ class StrategyTester:
                     </tr>
                     <tr>
                         <th>Total Trades</th><td class="number">{self.tester_stats.get('Total Trades', 0)}</td>
-                        <th>Short Trades (won %)</th><td class="number">{short_trades_won} ({100*short_trades_won/self.tester_stats.get('Total Short Trades',1):.2f}%)</td>
-                        <th>Long Trades (won %)</th><td class="number">{long_trades_won} ({100*long_trades_won/self.tester_stats.get('Total Long Trades',1):.2f}%)</td>
+                        <th>Short Trades (won %)</th><td class="number">{short_trades_won} ({100*short_trades_won/(self.tester_stats.get('Total Short Trades',1)+epsilon):.2f}%)</td>
+                        <th>Long Trades (won %)</th><td class="number">{long_trades_won} ({100*long_trades_won/(self.tester_stats.get('Total Long Trades',1)+epsilon):.2f}%)</td>
                     </tr>
                     <tr>
                         <th>Total Deals</th><td class="number">{self.tester_stats.get('Total Deals', 0)}</td>
@@ -2333,9 +2347,12 @@ class StrategyTester:
         
         path = os.path.join(self.reports_dir, "images")
         os.makedirs(path, exist_ok=True)
-                
-        curve_img = self._plot_tester_curves(output_path=os.path.join(path, f"{self.tester_config['bot_name'].replace(' ', '_')}_curve.png"))
-        curve_img = curve_img.replace(self.reports_dir+'\\', "")
+
+        try:
+            curve_img = self._plot_tester_curves(output_path=os.path.join(path, f"{self.tester_config['bot_name'].replace(' ', '_')}_curve.png"))
+            curve_img = curve_img.replace(self.reports_dir+'\\', "")
+        except Exception as e:
+            self.logger.warning(f"Failed to generate a balance curve {e}")
 
         # ------------------ render orders and deals ------------------------------
         
