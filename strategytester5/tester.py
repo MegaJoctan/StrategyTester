@@ -1,6 +1,6 @@
 from fontTools.misc.bezierTools import epsilon
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from strategytester5 import *
 from . import error_description
 from datetime import datetime, timedelta
@@ -15,6 +15,7 @@ from strategytester5.validators.tester_configs import TesterConfigValidators
 from strategytester5._template import html_report_template
 from strategytester5.hist.manager import  HistoryManager
 import sys
+import logging
 
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -29,6 +30,7 @@ class StrategyTester:
     def __init__(self,
                  tester_config: dict,
                  mt5_instance: MetaTrader5,
+                 logging_level: int = logging.WARNING,
                  logs_dir: Optional[str]="Logs",
                  reports_dir: Optional[str]="Reports",
                  history_dir: Optional[str]="History"):
@@ -38,6 +40,7 @@ class StrategyTester:
         Args:
             tester_config: Dictionary of tester configuration values.
             mt5_instance: MetaTrader5 API/client instance used for obtaining crucial information from the broker as an attempt to mimic the terminal.
+            logging_level: Minimum severity of messages to record. Uses standard `logging` levels (e.g., logging.DEBUG, INFO, WARNING, ERROR, CRITICAL). Messages below this level are ignored.
             logs_dir: Directory for log files.
             reports_dir: Directory for HTML reports and assets.
             history_dir: Directory for historical data storage.
@@ -186,6 +189,7 @@ class StrategyTester:
         }
         
         self.tester_stats = {}
+        self.IS_STOPPED = False
         
     def __curves_update(self, time, time_check=True):
         
@@ -1726,6 +1730,14 @@ class StrategyTester:
 
     def __account_monitoring(self, pos_must_exist: bool = True):
 
+        if evaluate_margin_state(self.AccountInfo).state == "STOP_OUT":
+            self.logger.critical("Account Margin STOPOUT Triggered!")
+            self.IS_STOPPED = True
+
+        # if evaluate_margin_state(self.AccountInfo).state == "MARGIN_CALL":
+            # self.logger.critical("Account Margin CALL Triggered!")
+            # self.IS_STOPPED = True
+
         # ------- monitor the account only if there is at least one position ------
 
         if (len(self.__positions_container__) > 0) if pos_must_exist else True:
@@ -1869,6 +1881,10 @@ class StrategyTester:
 
                     self.__positions_monitoring()
                     self.__account_monitoring()
+
+                    if self.IS_STOPPED: # if tester is stopped
+                        break #quit
+
                     self.__pending_orders_monitoring()
                     
                     any_tick_processed = False
@@ -1911,8 +1927,12 @@ class StrategyTester:
 
                     self.__positions_monitoring()
                     self.__account_monitoring()
+
+                    if self.IS_STOPPED: # if tester is stopped
+                        break #quit
+
                     self.__pending_orders_monitoring()
-                    
+
                     any_bar_processed = False
 
                     for bars_info in self.TESTER_ALL_BARS_INFO:
