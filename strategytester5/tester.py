@@ -1,6 +1,8 @@
 from fontTools.misc.bezierTools import epsilon
 
-from concurrent.futures import ThreadPoolExecutor
+import inspect
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from strategytester5 import *
 from . import error_description
 from datetime import datetime, timedelta
@@ -187,6 +189,7 @@ class StrategyTester:
         self.tester_stats = {}
         self.TESTER_IDX = 0
         self.IS_STOPPED = False
+        self._engine_lock = threading.RLock()   # re-entrant lock (safe if functions call other locked functions)
 
     def account_info(self) -> AccountInfo:
         
@@ -1871,9 +1874,8 @@ class StrategyTester:
         
         modelling = self.tester_config["modelling"]
         if modelling == "real_ticks" or modelling == "every_tick":
-            
+
             total_ticks = sum(ticks_info["size"] for ticks_info in self.TESTER_ALL_TICKS_INFO)
-            self.tester_stats["Ticks"] = total_ticks
 
             self.logger.debug(f"total number of ticks: {total_ticks}")
             self.__TesterInit(size=total_ticks)
@@ -1925,7 +1927,6 @@ class StrategyTester:
             
             bars_ = [bars_info["size"] for bars_info in self.TESTER_ALL_BARS_INFO]
             total_bars = sum(bars_)
-            self.tester_stats["Ticks"] = total_bars
             
             self.logger.debug(f"total number of bars: {total_bars}")
             self.__TesterInit(size=total_bars)
@@ -1976,6 +1977,29 @@ class StrategyTester:
         
         self.__TesterDeinit()
 
+    def __validate_ontick_signature(self, ontick_func):
+        sig = inspect.signature(ontick_func)
+        params = list(sig.parameters.values())
+
+        # Must accept at least one argument
+        if not params:
+            raise TypeError(
+                f"{ontick_func.__name__} must accept at least one argument (symbol). "
+                "Define it like: def on_tick(symbol): ..."
+            )
+
+        # First parameter must be able to receive a positional value
+        first = params[0]
+        if first.kind not in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.VAR_POSITIONAL,  # *args is also acceptable
+        ):
+            raise TypeError(
+                f"{ontick_func.__name__}'s first parameter must be positional to receive 'symbol'. "
+                "Define it like: def on_tick(symbol): ..."
+            )
+
     def __ontick_symbol(self, symbol: str, modelling: str, ontick_func: any):
 
         info = None
@@ -2003,34 +2027,51 @@ class StrategyTester:
 
         self.logger.info(f"{symbol} total number of ticks: {size}")
 
+        local_idx = 0
         with tqdm(total=size, desc=f"StrategyTester Progress on {symbol}", unit="tick" if is_tick_mode else "bar") as pbar:
-            while self.TESTER_IDX < size:
+            while local_idx < size:
 
-                tick = None
+                # tick = None
                 if is_tick_mode:
-                    tick = ticks.row(self.TESTER_IDX)
+                    tick = ticks.row(local_idx)
                 else:
-                    tick = self._bar_to_tick(symbol=symbol, bar=ticks.row(self.TESTER_IDX)) # a bar=tick is not actually a tick, rather a bar
+                    tick = self._bar_to_tick(symbol=symbol, bar=ticks.row(local_idx)) # a bar=tick is not actually a tick, rather a bar
 
+                local_idx += 1
                 if tick is None:
                     pbar.update(1)
                     continue
 
-                self.TickUpdate(symbol=symbol, tick=tick)
-                ontick_func()
+                # Critical section: only one thread at a time
 
-                positions_found = len(self.positions_get(symbol=symbol))>0
-                pending_orders_found = len(self.orders_get(symbol=symbol))>0
+                with self._engine_lock:
+                    self.TickUpdate(symbol=symbol, tick=tick)
 
-                if positions_found: # we monitor the account and positions only if they exist
+                    ontick_func(symbol) # each symbol processed in a separate thread
 
-                    self.__positions_n_account_monitoring()
-                    self.__curves_update(index=self.TESTER_IDX, time=tick.time)
+                    self.__account_monitoring()
 
-                if pending_orders_found:
-                    self.__pending_orders_monitoring()
+                    # monitor only when positions of such symbol exists
+                    if len(self.positions_get(symbol=symbol)) > 0:
+                        self.__positions_monitoring()
 
-                self.TESTER_IDX += 1
+                    # monitor only when orders of such symbol exists
+                    if len(self.orders_get(symbol=symbol)) > 0:
+                        self.__pending_orders_monitoring()
+
+                    if isinstance(tick, dict):
+                        time = tick["time"]
+                    elif isinstance(tick, tuple):
+                        tick = make_tick_from_tuple(tick)
+                        time = tick.time
+                    else:
+                        self.logger.error("Unknown tick type")
+                        continue
+
+                    self.__curves_update(index=self.TESTER_IDX, time=time)
+
+                    self.TESTER_IDX += 1
+
                 pbar.update(1)
 
     def ParallelOnTick(self, ontick_func):
@@ -2040,14 +2081,27 @@ class StrategyTester:
             ontick_func (_type_): A function to be called on every tick
         """
 
-        # self.__TesterInit()
+        self.__validate_ontick_signature(ontick_func)
 
         symbols = self.tester_config["symbols"]
         modelling = self.tester_config["modelling"]
         max_workers = len(symbols)
 
+        size = 0
+        if modelling in ("new_bar", "1-minute-ohlc"):
+            size = sum(bars_info["size"] for bars_info in self.TESTER_ALL_BARS_INFO)
+
+        if modelling in ("real_ticks", "every_tick"):
+            size = sum(ticks_info["size"] for ticks_info in self.TESTER_ALL_TICKS_INFO)
+
+        self.__TesterInit(size=size)
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futs = {executor.submit(self.__ontick_symbol, s, modelling, ontick_func): s for s in symbols}
+
+            # wait + raise exceptions
+            for fut in as_completed(futs):
+                fut.result()
 
         self.__TesterDeinit()
 
@@ -2080,6 +2134,7 @@ class StrategyTester:
 
     def __TesterDeinit(self):
 
+        self.tester_stats["Ticks"] = self.TESTER_IDX
         self.tester_stats["Symbols"] = len(self.tester_config["symbols"])
 
         profits = []
