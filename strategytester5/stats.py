@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit
 from strategytester5 import MetaTrader5
+from scipy.stats import linregress
 
 @njit(cache=True)
 def _maximal_drawdown_local_extrema_nb(x: np.ndarray, eps: float = 1e-12) -> float:
@@ -113,6 +114,11 @@ class TesterStats:
         self.eps = 1e-10
 
         self._compute()
+
+        y = self.balance_curve.astype(float)
+        x = np.arange(len(y), dtype=float)
+
+        self.lr_res = linregress(x, y)
 
     def _compute(self):
 
@@ -230,11 +236,11 @@ class TesterStats:
         return np.mean(self._losses) if self._losses else 0
 
     @property
-    def maximum_consecutive_wins(self) -> int:
+    def maximum_consecutive_wins_count(self) -> int:
         return self._max_profit_streak_count
 
     @property
-    def maximum_consecutive_losses(self) -> int:
+    def maximum_consecutive_losses_count(self) -> int:
         return self._max_loss_streak_count
 
     @property
@@ -244,6 +250,22 @@ class TesterStats:
     @property
     def maximum_consecutive_losses_money(self) -> float:
         return self._max_loss_streak_money
+
+    @property
+    def maximal_consecutive_profit_count(self) -> int:
+        return 0
+
+    @property
+    def maximal_consecutive_loss_count(self) -> int:
+        return 0
+
+    @property
+    def maximal_consecutive_profit_money(self) -> float:
+        return 0.0
+
+    @property
+    def maximal_consecutive_loss_money(self) -> float:
+        return 0.0
 
     @property
     def average_consecutive_wins(self) -> float:
@@ -267,11 +289,11 @@ class TesterStats:
 
     @property
     def profit_factor(self) -> float:
-        return self.gross_profit / (1 if self.gross_loss == 0 else self.gross_loss)
+        return self.gross_profit / max(self.gross_loss, 0.1)
 
     @property
     def recovery_factor(self) -> float:
-        return self.net_profit / (1 if self.balance_drawdown_absolute else self.balance_drawdown_absolute)
+        return self.net_profit / max(self.equity_drawdown_maximal, self.eps)
 
     @property
     def expected_payoff(self) -> int:
@@ -318,7 +340,8 @@ class TesterStats:
 
     @property
     def sharpe_ratio(self) -> float:
-        return np.mean(self._returns) / np.max(np.std(self._returns), self.eps)
+        std = np.std(self._returns)
+        return float(np.mean(self._returns) / np.maximum(std, self.eps))
 
     @property
     def z_score(self) -> float:
@@ -334,11 +357,11 @@ class TesterStats:
 
     @property
     def lr_correlation(self) -> float:
-        return 0.0
+        return self.lr_res.rvalue
 
     @property
     def lr_standard_error(self) -> float:
-        return 0.0
+        return self.lr_res.stderr
 
     @property
     def on_tester_results(self) -> float:
