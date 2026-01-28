@@ -333,7 +333,11 @@ class TesterStats:
         return np.prod(1 + self._returns) if len(self._returns) else 0
 
     @property
-    def LR_correlation(self) -> float:
+    def lr_correlation(self) -> float:
+        return 0.0
+
+    @property
+    def lr_standard_error(self) -> float:
         return 0.0
 
     @property
