@@ -365,11 +365,11 @@ class TesterStats:
 
     @property
     def profit_factor(self) -> float:
-        return self.gross_profit / self.gross_loss + self.eps
+        return self.gross_profit / (self.gross_loss + self.eps)
 
     @property
     def recovery_factor(self) -> float:
-        return self.net_profit / self.equity_drawdown_maximal + self.eps
+        return self.net_profit / (self.equity_drawdown_maximal + self.eps)
 
     @property
     def expected_payoff(self) -> int:
