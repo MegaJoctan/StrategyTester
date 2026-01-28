@@ -32,8 +32,8 @@ symbol = "EURUSD"
 timeframe = "PERIOD_H1"
 magic_number = 10012026
 slippage = 100
-sl = 1000
-tp = 100
+sl = 700
+tp = 500
 
 # ---------------------------------------------------------
 
@@ -56,12 +56,11 @@ def on_tick():
     bid = tick_info.bid
     
     pts = symbol_info.point
-    
-    if not pos_exists(magic=magic_number, type=mt5.POSITION_TYPE_BUY): # If a position of such kind doesn't exist
-        m_trade.buy(volume=0.1, symbol=symbol, price=ask, sl=ask-sl*pts, tp=ask+tp*pts, comment="Tester buy") # we open a buy position
-    
-    if not pos_exists(magic=magic_number, type=mt5.POSITION_TYPE_SELL): # If a position of such kind doesn't exist
-        m_trade.sell(volume=0.1, symbol=symbol, price=bid, sl=bid+sl*pts, tp=bid-tp*pts, comment="Tester sell") # we open a sell position
-    
+
+    if not pos_exists(magic=magic_number, type=mt5.POSITION_TYPE_BUY):  # If a position of such kind doesn't exist
+        m_trade.buy(volume=0.01, symbol=symbol, price=ask, sl=ask - sl * pts, tp=ask + tp * pts, comment="Tester buy")  # we open a buy position
+
+    if not pos_exists(magic=magic_number, type=mt5.POSITION_TYPE_SELL):  # If a position of such kind doesn't exist
+        m_trade.sell(volume=0.01, symbol=symbol, price=bid, sl=bid + sl * pts, tp=bid - tp * pts, comment="Tester sell")  # we open a sell position
 
 tester.OnTick(ontick_func=on_tick) # very important!

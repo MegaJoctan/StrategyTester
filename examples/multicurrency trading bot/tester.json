@@ -5,7 +5,7 @@
         "timeframe": "H1",
         "start_date": "01.10.2025 00:00",
         "end_date": "31.12.2025 00:00",
-        "modelling" : "every_tick",
+        "modelling" : "new_bar",
         "deposit": 1000,
         "leverage": "1:100"
     }
