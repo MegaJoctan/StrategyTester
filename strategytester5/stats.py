@@ -74,6 +74,7 @@ class TesterStats:
                 initial_deposit: float,
                 balance_curve: np.ndarray,
                 equity_curve: np.ndarray,
+                margin_curve: np.ndarray,
                 ticks: int,
                 symbols: int
                 ):
@@ -82,6 +83,7 @@ class TesterStats:
         self.initial_deposit = float(initial_deposit)
         self.balance_curve = np.ascontiguousarray(np.asarray(balance_curve, dtype=np.float64)).reshape(-1)
         self.equity_curve = np.ascontiguousarray(np.asarray(equity_curve, dtype=np.float64)).reshape(-1)
+        self.margin_curve = np.ascontiguousarray(np.asarray(margin_curve, dtype=np.float64)).reshape(-1)
         self.ticks = ticks
         self.symbols = symbols
 
@@ -337,3 +339,7 @@ class TesterStats:
     @property
     def on_tester_results(self) -> float:
         return 0.0
+
+    @property
+    def margin_level(self) -> float:
+        return np.min(self.margin_curve)
