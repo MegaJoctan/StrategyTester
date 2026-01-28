@@ -75,7 +75,7 @@ class TesterStats:
                 initial_deposit: float,
                 balance_curve: np.ndarray,
                 equity_curve: np.ndarray,
-                margin_curve: np.ndarray,
+                margin_level_curve: np.ndarray,
                 ticks: int,
                 symbols: int
                 ):
@@ -84,7 +84,7 @@ class TesterStats:
         self.initial_deposit = float(initial_deposit)
         self.balance_curve = np.ascontiguousarray(np.asarray(balance_curve, dtype=np.float64)).reshape(-1)
         self.equity_curve = np.ascontiguousarray(np.asarray(equity_curve, dtype=np.float64)).reshape(-1)
-        self.margin_curve = np.ascontiguousarray(np.asarray(margin_curve, dtype=np.float64)).reshape(-1)
+        self.margin_level_curve = np.ascontiguousarray(np.asarray(margin_level_curve, dtype=np.float64)).reshape(-1)
         self.ticks = ticks
         self.symbols = symbols
 
@@ -235,37 +235,40 @@ class TesterStats:
     def average_loss_trade(self) -> float:
         return np.mean(self._losses) if self._losses else 0
 
-    @property
-    def maximum_consecutive_wins_count(self) -> int:
-        return self._max_profit_streak_count
+    # ---------- streak metrics ----------
 
     @property
-    def maximum_consecutive_losses_count(self) -> int:
-        return self._max_loss_streak_count
+    def maximum_consecutive_wins_count(self) -> int:
+        return self._max_consec_win_count
 
     @property
     def maximum_consecutive_wins_money(self) -> float:
-        return self._max_profit_streak_money
+        return self._max_consec_win_money
+
+    @property
+    def maximum_consecutive_losses_count(self) -> int:
+        return self._max_consec_loss_count
 
     @property
     def maximum_consecutive_losses_money(self) -> float:
-        return self._max_loss_streak_money
+        # show as absolute money if you prefer; MT5 shows total loss (negative) in brackets
+        return self._max_consec_loss_money
 
     @property
     def maximal_consecutive_profit_count(self) -> int:
-        return 0
-
-    @property
-    def maximal_consecutive_loss_count(self) -> int:
-        return 0
+        return self._max_profit_streak_count
 
     @property
     def maximal_consecutive_profit_money(self) -> float:
-        return 0.0
+        return self._max_profit_streak_money
+
+    @property
+    def maximal_consecutive_loss_count(self) -> int:
+        return self._max_loss_streak_count
 
     @property
     def maximal_consecutive_loss_money(self) -> float:
-        return 0.0
+        return self._max_loss_streak_money
 
     @property
     def average_consecutive_wins(self) -> float:
@@ -293,7 +296,7 @@ class TesterStats:
 
     @property
     def recovery_factor(self) -> float:
-        return self.net_profit / max(self.equity_drawdown_maximal, self.eps)
+        return self.net_profit / max(self.balance_drawdown_maximal, self.eps)
 
     @property
     def expected_payoff(self) -> int:
@@ -343,9 +346,38 @@ class TesterStats:
         std = np.std(self._returns)
         return float(np.mean(self._returns) / np.maximum(std, self.eps))
 
+    # ---------- Z-score (runs test over win/loss sequence) ----------
+
     @property
     def z_score(self) -> float:
-        return 0.0
+        # MT5 series test (runs). :contentReference[oaicite:19]{index=19}
+        # Build win/loss sequence from CLOSED trades:
+        seq = []
+        for d in self.deals:
+            if getattr(d, "entry", None) != MetaTrader5.DEAL_ENTRY_OUT:
+                continue
+            seq.append(1 if float(getattr(d, "profit", 0.0)) > 0.0 else 0)
+
+        n = len(seq)
+        if n < 2:
+            return 0.0
+
+        n1 = sum(seq)          # wins
+        n2 = n - n1            # losses
+        if n1 == 0 or n2 == 0:
+            return 0.0
+
+        # number of runs
+        R = 1
+        for i in range(1, n):
+            if seq[i] != seq[i - 1]:
+                R += 1
+
+        ER = 1.0 + (2.0 * n1 * n2) / (n1 + n2)
+        VR = (2.0 * n1 * n2 * (2.0 * n1 * n2 - n1 - n2)) / (((n1 + n2) ** 2) * (n1 + n2 - 1.0))
+        if VR <= self.eps:
+            return 0.0
+        return float((R - ER) / np.sqrt(VR))
 
     @property
     def ahpr(self) -> float:
@@ -369,4 +401,4 @@ class TesterStats:
 
     @property
     def margin_level(self) -> float:
-        return np.min(self.margin_curve)
+        return np.min(self.margin_level_curve)
