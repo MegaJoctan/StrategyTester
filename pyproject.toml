@@ -21,7 +21,8 @@ dependencies = [
   "matplotlib",
   "seaborn",
   "tqdm",
-  "numba"
+  "numba",
+  "scipy"
 ]
 
 keywords = [
