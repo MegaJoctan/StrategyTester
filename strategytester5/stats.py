@@ -75,13 +75,15 @@ class TesterStats:
                 balance_curve: np.ndarray,
                 equity_curve: np.ndarray,
                 ticks: int,
-                symbols: list
+                symbols: int
                 ):
 
         self.deals = deals
         self.initial_deposit = float(initial_deposit)
         self.balance_curve = np.ascontiguousarray(np.asarray(balance_curve, dtype=np.float64)).reshape(-1)
         self.equity_curve = np.ascontiguousarray(np.asarray(equity_curve, dtype=np.float64)).reshape(-1)
+        self.ticks = ticks
+        self.symbols = symbols
 
         self._profits: list[float] = []
         self._losses: list[float] = []  # negative profits (losses)
