@@ -336,12 +336,12 @@ def render_stats_table(stats: TesterStats) -> str:
                     <th>Z-Score</th><td class="number">{stats.z_score:.2f}</td>
                 </tr>
                 <tr>
-                    <th>AHPR</th><td class="number">{stats.ahpr:.4f}</td>
+                    <th>AHPR</th><td class="number">{stats.ahpr_factor:.4f} ({stats.ahpr_percent:.2f}%)</td>
                     <th>LR Correlation</th><td class="number">{stats.lr_correlation:.2f}</td>
                     <th>OnTester result</th><td class="number">{stats.on_tester_results}</td>
                 </tr>
                 <tr>
-                    <th>GHPR</th><td class="number">{stats.ghpr:.4f}</td>
+                    <th>GHPR</th><td class="number">{stats.ghpr_factor:.4f} ({stats.ghpr_percent:.2f}%)</td>
                     <th>LR Standard Error</th><td class="number">{stats.lr_standard_error:.2f}</td>
                     <td></td><td></td>
                 </tr>

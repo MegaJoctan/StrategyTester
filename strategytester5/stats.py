@@ -2,10 +2,10 @@ import numpy as np
 from numba import njit
 from strategytester5 import MetaTrader5
 from scipy.stats import linregress
-
+"""
 @njit(cache=True)
 def _maximal_drawdown_local_extrema_nb(x: np.ndarray, eps: float = 1e-12) -> float:
-    """
+    \"""
     MT5-style maximal drawdown:
       max over local maxima (peak - next local minimum after that peak)
 
@@ -13,7 +13,7 @@ def _maximal_drawdown_local_extrema_nb(x: np.ndarray, eps: float = 1e-12) -> flo
       - preallocates peaks/troughs arrays
       - uses counters instead of Python lists
       - plateau handling (flat runs)
-    """
+    \"""
     n = x.size
     if n < 3:
         return 0.0
@@ -68,6 +68,67 @@ def _maximal_drawdown_local_extrema_nb(x: np.ndarray, eps: float = 1e-12) -> flo
             max_dd = dd
 
     return max_dd if max_dd > 0.0 else 0.0
+"""
+
+@njit(cache=True)
+def _max_dd_money_and_pct_nb(x: np.ndarray, eps: float = 1e-12):
+    """
+    Returns (max_dd_money, max_dd_percent) using MT5 local-high -> next-local-low definition.
+    """
+    n = x.size
+    if n < 3:
+        return 0.0, 0.0
+
+    peaks = np.empty(n, dtype=np.int64)
+    troughs = np.empty(n, dtype=np.int64)
+    pcount = 0
+    tcount = 0
+
+    i = 1
+    while i < n - 1:
+        left = x[i - 1]
+        mid = x[i]
+
+        j = i
+        while j < n - 1 and abs(x[j] - x[j + 1]) <= eps:
+            j += 1
+        right = x[j + 1] if j < n - 1 else x[j]
+
+        if mid > left + eps and mid > right + eps:
+            peaks[pcount] = i
+            pcount += 1
+        elif mid < left - eps and mid < right - eps:
+            troughs[tcount] = i
+            tcount += 1
+
+        i = j + 1
+
+    if pcount == 0 or tcount == 0:
+        return 0.0, 0.0
+
+    max_dd = 0.0
+    max_pct = 0.0
+    t_idx = 0
+
+    for pi in range(pcount):
+        p = peaks[pi]
+        while t_idx < tcount and troughs[t_idx] <= p:
+            t_idx += 1
+        if t_idx >= tcount:
+            break
+
+        t = troughs[t_idx]
+        peak_val = x[p]
+        dd = peak_val - x[t]
+        if dd > max_dd:
+            max_dd = dd
+
+        if peak_val > eps:
+            pct = dd / peak_val * 100.0
+            if pct > max_pct:
+                max_pct = pct
+
+    return max_dd if max_dd > 0.0 else 0.0, max_pct if max_pct > 0.0 else 0.0
 
 class TesterStats:
     def __init__(self,
@@ -307,62 +368,64 @@ class TesterStats:
 
     @property
     def recovery_factor(self) -> float:
-        return self.net_profit / max(self.balance_drawdown_maximal, self.eps)
+        return self.net_profit / max(self.equity_drawdown_maximal, self.eps)
 
     @property
     def expected_payoff(self) -> int:
         return (self.net_profit / self.total_trades) if self.total_trades > 0 else 0
-
-    @property
-    def equity_drawdown_absolute(self) -> float:
-        return self.initial_deposit - np.min(self.equity_curve)
-
-    @property
-    def equity_drawdown_absolute_percent(self) -> float:
-        return 0.0
-
-    @property
-    def equity_drawdown_relative(self) -> float:
-        return self.equity_drawdown_absolute / (np.max(self.equity_curve) + self.eps) * 100
+    # ---------- drawdowns ----------
+    @staticmethod
+    def _abs_drawdown(initial: float, curve: np.ndarray) -> float:
+        if curve.size == 0:
+            return 0.0
+        min_val = float(np.min(curve))
+        dd = initial - min_val
+        return dd if dd > 0.0 else 0.0
 
     @property
     def balance_drawdown_absolute(self) -> float:
-        return self.initial_deposit - np.min(self.balance_curve)
+        # AbsoluteDrawDown = InitialDeposit - MinimalBalance (below initial) :contentReference[oaicite:12]{index=12}
+        return self._abs_drawdown(self.initial_deposit, self.balance_curve)
 
     @property
-    def balance_drawdown_absolute_percent(self) -> float:
-        return 0.0
-
-    @property
-    def balance_drawdown_relative(self) -> float:
-        return self.balance_drawdown_absolute / (np.max(self.balance_curve) + self.eps) * 100
-
-    def _maximal_drawdown(self, curve) -> float:
-        """
-        MT5-style maximal drawdown (wrapper around a Numba kernel).
-        """
-        arr = np.ascontiguousarray(np.asarray(curve, dtype=np.float64))
-        return float(_maximal_drawdown_local_extrema_nb(arr))
+    def equity_drawdown_absolute(self) -> float:
+        return self._abs_drawdown(self.initial_deposit, self.equity_curve)
 
     @property
     def balance_drawdown_maximal(self) -> float:
-        return self._maximal_drawdown(self.balance_curve)
+        return float(_max_dd_money_and_pct_nb(self.balance_curve)[0])
+
+    @property
+    def balance_drawdown_relative(self) -> float:
+        # MT5 relative drawdown uses local high -> next local low (max %) :contentReference[oaicite:13]{index=13}
+        return float(_max_dd_money_and_pct_nb(self.balance_curve)[1])
 
     @property
     def equity_drawdown_maximal(self) -> float:
-        return self._maximal_drawdown(self.equity_curve)
+        return float(_max_dd_money_and_pct_nb(self.equity_curve)[0])
+
+    @property
+    def equity_drawdown_relative(self) -> float:
+        return float(_max_dd_money_and_pct_nb(self.equity_curve)[1])
 
     @property
     def sharpe_ratio(self) -> float:
-        std = np.std(self._returns)
-        return float(np.mean(self._returns) / np.maximum(std, self.eps))
+        """(Return - 0) / std(Return)"""
+        r = np.asarray(self._trade_returns, dtype=np.float64)
+
+        if r.size < 2:
+            return 0.0
+
+        std = float(np.std(r))
+        return float(np.mean(r) / np.maximum(std, self.eps))
 
     # ---------- Z-score (runs test over win/loss sequence) ----------
 
     @property
     def z_score(self) -> float:
-        # MT5 series test (runs). :contentReference[oaicite:19]{index=19}
-        # Build win/loss sequence from CLOSED trades:
+
+        """ Build win/loss sequence from CLOSED trades:"""
+
         seq = []
         for d in self.deals:
             if getattr(d, "entry", None) != MetaTrader5.DEAL_ENTRY_OUT:
@@ -390,13 +453,49 @@ class TesterStats:
             return 0.0
         return float((R - ER) / np.sqrt(VR))
 
+    # ---------- AHPR / GHPR ----------
+
+    """
     @property
     def ahpr(self) -> float:
-        return np.prod(1 + self._returns) ** (1 / len(self._returns)) if len(self._returns) else 0
+
+        \""" arithmetic mean of trade returns (fraction). In report they also show % in brackets.\"""
+
+        r = np.asarray(self._trade_returns, dtype=np.float64)
+        return float(np.mean(r)) if r.size else 0.0
 
     @property
     def ghpr(self) -> float:
-        return np.prod(1 + self._returns) if len(self._returns) else 0
+        \""" geometric mean of trade returns (fraction)\"""
+
+        r = np.asarray(self._trade_returns, dtype=np.float64)
+        if r.size == 0:
+            return 0.0
+        g = float(np.prod(1.0 + r) ** (1.0 / r.size) - 1.0)
+        return g
+    """
+
+    @property
+    def ahpr_factor(self) -> float:
+        r = np.asarray(self._trade_returns, dtype=np.float64)
+        if r.size == 0:
+            return 1.0
+        return float(1.0 + np.mean(r))
+
+    @property
+    def ahpr_percent(self) -> float:
+        return float((self.ahpr_factor - 1.0) * 100.0)
+
+    @property
+    def ghpr_factor(self) -> float:
+        r = np.asarray(self._trade_returns, dtype=np.float64)
+        if r.size == 0:
+            return 1.0
+        return float(np.prod(1.0 + r) ** (1.0 / r.size))
+
+    @property
+    def ghpr_percent(self) -> float:
+        return float((self.ghpr_factor - 1.0) * 100.0)
 
     @property
     def lr_correlation(self) -> float:
