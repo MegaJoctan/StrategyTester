@@ -27,7 +27,7 @@ except Exception as e:
     raise RuntimeError(e)
 
 tester_configs = configs_json["tester"]
-tester = StrategyTester(tester_config=tester_configs, mt5_instance=mt5, logging_level=logging.DEBUG) # very important
+tester = StrategyTester(tester_config=tester_configs, mt5_instance=mt5, logging_level=logging.INFO) # very important
 
 # ---------------------- inputs ----------------------------
 
