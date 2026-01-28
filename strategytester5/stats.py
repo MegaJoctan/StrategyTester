@@ -194,13 +194,13 @@ class TesterStats:
 
             self._total_trades += 1
 
-            d_type = getattr(d, "type", None)
+            d_type = d.type
             if d_type == MetaTrader5.DEAL_TYPE_BUY:
                 self._total_long_trades += 1
             elif d_type == MetaTrader5.DEAL_TYPE_SELL:
                 self._total_short_trades += 1
 
-            profit = float(getattr(d, "profit", 0.0))
+            profit = d.profit + d.commission
 
             # ---- per-trade return (percent change per trade) for AHPR/GHPR :contentReference[oaicite:10]{index=10}
             bal_after = getattr(d, "balance", None)
@@ -211,6 +211,7 @@ class TesterStats:
                     self._trade_returns.append(profit / bal_before)
 
             if profit > 0.0:
+
                 self._profits.append(profit)
 
                 if cur_loss_count > 0:
@@ -356,23 +357,24 @@ class TesterStats:
 
     @property
     def gross_loss(self) -> float:
-        return np.sum(np.abs(self._losses)) if self._losses else 0.0
+        return np.sum(self._losses) if self._losses else 0.0
 
     @property
     def net_profit(self) -> float:
-        return self.gross_profit - self.gross_loss
+        return self.gross_profit - np.abs(self.gross_loss)
 
     @property
     def profit_factor(self) -> float:
-        return self.gross_profit / max(self.gross_loss, 0.1)
+        return self.gross_profit / self.gross_loss + self.eps
 
     @property
     def recovery_factor(self) -> float:
-        return self.net_profit / max(self.equity_drawdown_maximal, self.eps)
+        return self.net_profit / self.equity_drawdown_maximal + self.eps
 
     @property
     def expected_payoff(self) -> int:
         return (self.net_profit / self.total_trades) if self.total_trades > 0 else 0
+
     # ---------- drawdowns ----------
     @staticmethod
     def _abs_drawdown(initial: float, curve: np.ndarray) -> float:
