@@ -62,6 +62,17 @@ def pos_exists(magic: int, symbol: str, type: int) -> bool:
 
 def on_tick_multicurrency(symbol: str):
 
+    for tf in timeframes:
+        rates = tester.copy_rates_from_pos(symbol=symbol, timeframe=tf, start_pos=0, count=5)
+
+        if rates is None:
+            continue
+
+        if len(rates) == 0:
+            continue
+
+    return
+
     m_trade = m_trade_objects[symbol]
     tick_info = tester.symbol_info_tick(symbol=symbol)
 

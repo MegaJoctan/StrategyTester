@@ -1,7 +1,9 @@
+import logging
 import sys
 import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, ROOT)  # insert(0) so it wins over other paths
 
 import MetaTrader5 as mt5
 from strategytester5.tester import StrategyTester, TIMEFRAME2STRING_MAP
@@ -18,14 +20,14 @@ if not mt5.initialize(): # Initialize MetaTrader5 instance
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 try:
-    with open(os.path.join(BASE_DIR, "tester.json"), 'r', encoding='utf-8') as file: # reading a JSON file
+    with open(os.path.join(BASE_DIR, "tester_config_single_instrument.json"), 'r', encoding='utf-8') as file: # reading a JSON file
         # Deserialize the file data into a Python object
         configs_json = json.load(file)
 except Exception as e:
     raise RuntimeError(e)
 
 tester_configs = configs_json["tester"]
-tester = StrategyTester(tester_config=tester_configs, mt5_instance=mt5) # very important
+tester = StrategyTester(tester_config=tester_configs, mt5_instance=mt5, logging_level=logging.INFO) # very important
 
 # -------------  global variables ----------------
 
@@ -47,10 +49,10 @@ def on_tick():
             if len(rates) ==0:
                 continue
 
-            open_price = rates[-1]["open"] # current opening price, the latest one in the array
-            time = datetime.fromtimestamp(rates[-1]["time"])
+            # open_price = rates[-1]["open"] # current opening price, the latest one in the array
+            # time = datetime.fromtimestamp(rates[-1]["time"])
 
-            print(f"{time} : symbol: {symbol} tf: {TIMEFRAME2STRING_MAP[tf]} | Current candle's opening = {open_price:.5f}");
+            # print(f"{time} : symbol: {symbol} tf: {TIMEFRAME2STRING_MAP[tf]} | Current candle's opening = {open_price:.5f}");
 
 
 tester.OnTick(ontick_func=on_tick) # very important!
