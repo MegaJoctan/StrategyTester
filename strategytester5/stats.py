@@ -397,18 +397,24 @@ class TesterStats:
     def balance_drawdown_maximal(self) -> float:
         return float(_max_dd_money_and_pct_nb(self.balance_curve)[0])
 
+    def _validate_baleq_values(self, value: float) -> float:
+        if abs(value) > self.initial_deposit:
+            return np.nan
+
+        return value
+
     @property
     def balance_drawdown_relative(self) -> float:
-        # MT5 relative drawdown uses local high -> next local low (max %) :contentReference[oaicite:13]{index=13}
-        return float(_max_dd_money_and_pct_nb(self.balance_curve)[1])
+        """ MT5 relative drawdown uses local high -> next local low (max %)"""
+        return self._validate_baleq_values(float(_max_dd_money_and_pct_nb(self.balance_curve)[1]))
 
     @property
     def equity_drawdown_maximal(self) -> float:
-        return float(_max_dd_money_and_pct_nb(self.equity_curve)[0])
+        return self._validate_baleq_values(float(_max_dd_money_and_pct_nb(self.equity_curve)[0]))
 
     @property
     def equity_drawdown_relative(self) -> float:
-        return float(_max_dd_money_and_pct_nb(self.equity_curve)[1])
+        return self._validate_baleq_values(float(_max_dd_money_and_pct_nb(self.equity_curve)[1]))
 
     @property
     def sharpe_ratio(self) -> float:
