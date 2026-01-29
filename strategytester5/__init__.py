@@ -424,19 +424,35 @@ def evaluate_margin_state(acct: AccountInfo) -> MarginEvent:
     """
 
     mode = int(acct.margin_so_mode)
+
+    """
+    mode_map = {
+        MetaTrader5.ACCOUNT_STOPOUT_MODE_PERCENT: "Percent",
+        MetaTrader5.ACCOUNT_STOPOUT_MODE_MONEY: "Money"
+    }
+
+    print("margin mode: ", mode_map.get(mode, "Unknown"))
+    """
+
     call_level = float(acct.margin_so_call or 0.0)
     stop_level = float(acct.margin_so_so   or 0.0)
 
     if mode == 0:
         # Percent mode: margin_level is percentage.
-        # Typical formula: equity/margin*100 when margin>0. :contentReference[oaicite:5]{index=5}
-        value = float(acct.margin_level) if acct.margin_level is not None else float("inf")
+        # Typical formula: equity/margin*100 when margin>0.
+
+        used_margin = float(acct.margin or 0.0)
+        equity = float(acct.equity or 0.0)
+
+        value = float("inf") if used_margin <= 0.0 else (equity / used_margin) * 100.0
 
         if stop_level > 0 and value <= stop_level:
-            return MarginEvent("STOP_OUT", f"margin_level {value:.2f}% <= stop_out {stop_level:.2f}%", value, call_level, stop_level, mode)
+            return MarginEvent("STOP_OUT", f"margin_level {value:.2f}% <= stop_out {stop_level:.2f}%", value,
+                               call_level, stop_level, mode)
 
         if call_level > 0 and value <= call_level:
-            return MarginEvent("MARGIN_CALL", f"margin_level {value:.2f}% <= margin_call {call_level:.2f}%", value, call_level, stop_level, mode)
+            return MarginEvent("MARGIN_CALL", f"margin_level {value:.2f}% <= margin_call {call_level:.2f}%", value,
+                               call_level, stop_level, mode)
 
         return MarginEvent("OK", "margin ok", value, call_level, stop_level, mode)
 
@@ -609,4 +625,3 @@ def get_logger(task_name: str, logfile: str, level=logging.INFO):
 LOGGER = None
 
 CURVES_PLOT_INTERVAL_MINS = 60
-
