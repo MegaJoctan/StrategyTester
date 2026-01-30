@@ -1,6 +1,7 @@
 .vscode/
 .git/
 .env/
+.idea/
 
 __pycache__/
 Logs/
