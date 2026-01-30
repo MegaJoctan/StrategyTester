@@ -24,10 +24,6 @@ dependencies = [
   "scipy"
 ]
 
-[project.optional-dependencies]
-
-mt5 = ["metatrader5"]
-
 keywords = [
   "MetaTrader5",
   "MetaTrader4",
@@ -58,6 +54,9 @@ classifiers = [
   "Topic :: Office/Business :: Financial",
   "Topic :: Scientific/Engineering"
 ]
+
+[project.optional-dependencies]
+mt5 = ["metatrader5"]
 
 [project.urls]
 Homepage = "https://github.com/MegaJoctan/StrategyTester5"
