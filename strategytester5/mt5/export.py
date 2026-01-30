@@ -11,7 +11,7 @@ def get_server_name(mt5_instance: MetaTrader5) -> str:
 
     return ac_info.server
 
-def symbol_info(mt5_instance: MetaTrader5, out_path: str):
+def all_symbol_info(mt5_instance: MetaTrader5, out_path: str):
     symbols = mt5_instance.symbols_get()
     if symbols is None:
         raise RuntimeError(f"symbols_get() failed: {mt5_instance.last_error()}")
