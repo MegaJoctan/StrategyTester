@@ -1,4 +1,4 @@
-__version__ = '1.1.0'
+__version__ = '1.3.2'
 __author__  = 'Omega Joctan Msigwa.'
 
 from collections import namedtuple
@@ -6,7 +6,30 @@ import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 from calendar import monthrange
-import MetaTrader5
+
+try:
+    import MetaTrader5 as _mt5
+    MT5_AVAILABLE = True
+
+except ImportError:
+    from strategytester5.mt5 import constants as _mt5
+
+    print(
+        "MetaTrader5 is not installed.\n"
+        "On Windows, install it with: pip install strategytester5[mt5]\n"
+        "Falling back to bundled MT5 constants."
+    )
+    MT5_AVAILABLE = False
+
+MetaTrader5 = _mt5
+
+def no_mt5_runtime_error():
+    if not MT5_AVAILABLE:
+        raise RuntimeError(
+            "MetaTrader5 is not installed.\n"
+            "On Windows, install it with: pip install strategytester5[mt5]"
+        )
+
 from typing import Any
 
 IS_DEBUG = True
@@ -621,7 +644,5 @@ def get_logger(task_name: str, logfile: str, level=logging.INFO):
 
     logger.propagate = False
     return logger
-
-LOGGER = None
 
 CURVES_PLOT_INTERVAL_MINS = 60
